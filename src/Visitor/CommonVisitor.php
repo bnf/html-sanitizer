@@ -92,18 +92,22 @@ class CommonVisitor extends AbstractVisitor implements LoggerAwareInterface
         return $domNode;
     }
 
-    protected function enterDomElement(?DOMNode $domNode, Behavior\NodeInterface $node): ?DOMNode
+    protected function enterDomElement(DOMElement $domElement, Behavior\NodeInterface $node): ?DOMNode
     {
-        if (!$domNode instanceof DOMElement || !$node instanceof Behavior\Tag) {
-            return $domNode;
+        if (!$node instanceof Behavior\Tag) {
+            return $domElement;
         }
-        $domNode = $this->processAttributes($domNode, $node);
-        $domNode = $this->processChildren($domNode, $node);
+        $domElement = $this->processAttributes($domElement, $node);
+        if (!$domElement instanceof DOMElement) {
+            return $domElement;
+        }
+
+        $this->processChildren($domElement, $node);
         // completely remove node, in case it is expected to exist with attributes only
-        if ($domNode instanceof DOMElement && $domNode->attributes->length === 0 && $node->shallPurgeWithoutAttrs()) {
+        if ($domElement->attributes->length === 0 && $node->shallPurgeWithoutAttrs()) {
             return null;
         }
-        return $this->handleMandatoryAttributes($domNode, $node);
+        return $this->handleMandatoryAttributes($domElement, $node);
     }
 
     public function leaveNode(DOMNode $domNode): ?DOMNode
@@ -127,82 +131,72 @@ class CommonVisitor extends AbstractVisitor implements LoggerAwareInterface
         return $domNode;
     }
 
-    protected function processAttributes(?DOMNode $domNode, Behavior\Tag $tag): ?DOMNode
+    protected function processAttributes(DOMElement $domElement, Behavior\Tag $tag): ?DOMNode
     {
-        if (!$domNode instanceof DOMElement) {
-            return $domNode;
-        }
         // reverse processing of attributes,
         // allowing to directly remove attribute nodes
-        for ($i = $domNode->attributes->length - 1; $i >= 0; $i--) {
+        for ($i = $domElement->attributes->length - 1; $i >= 0; $i--) {
             /** @var DOMAttr $attribute */
-            $attribute = $domNode->attributes->item($i);
+            $attribute = $domElement->attributes->item($i);
             try {
-                $this->processAttribute($domNode, $tag, $attribute);
+                $this->processAttribute($domElement, $tag, $attribute);
             } catch (Behavior\NodeException $exception) {
                 return $exception->getDomNode();
             }
         }
-        return $domNode;
+        return $domElement;
     }
 
-    protected function processChildren(?DOMNode $domNode, Behavior\Tag $tag): ?DOMNode
+    protected function processChildren(DOMElement $domElement, Behavior\Tag $tag): void
     {
-        if (!$domNode instanceof DOMElement) {
-            return $domNode;
-        }
         if (!$tag->shallAllowChildren()
-            && $domNode->childNodes->length > 0
+            && $domElement->childNodes->length > 0
             && $this->behavior->shallRemoveUnexpectedChildren()
         ) {
             $this->log('Found unexpected children for {nodeName}', [
                 'behavior' => $this->behavior->getName(),
-                'nodeName' => $domNode->nodeName,
+                'nodeName' => $domElement->nodeName,
             ]);
             // reverse processing of children,
             // allowing to directly remove child nodes
-            for ($i = $domNode->childNodes->length - 1; $i >= 0; $i--) {
+            for ($i = $domElement->childNodes->length - 1; $i >= 0; $i--) {
                 /** @var DOMNode $child */
-                $child = $domNode->childNodes->item($i);
-                $domNode->removeChild($child);
+                $child = $domElement->childNodes->item($i);
+                $domElement->removeChild($child);
             }
         }
-        return $domNode;
     }
 
     /**
      * @throws Behavior\NodeException
      */
-    protected function processAttribute(DOMElement $domNode, Behavior\Tag $tag, DOMAttr $attribute): void
+    protected function processAttribute(DOMElement $domElement, Behavior\Tag $tag, DOMAttr $attribute): void
     {
         $name = strtolower($attribute->name);
         $attr = $tag->getAttr($name);
         if ($attr === null || !$attr->matchesValue($attribute->value)) {
             $this->log('Found invalid attribute {nodeName}.{attrName}', [
                 'behavior' => $this->behavior->getName(),
-                'nodeName' => $domNode->nodeName,
+                'nodeName' => $domElement->nodeName,
                 'attrName' => $attribute->nodeName,
             ]);
-            $this->handleInvalidAttr($domNode, $name);
+            $this->handleInvalidAttr($domElement, $name);
         }
     }
 
-    protected function handleMandatoryAttributes(?DOMNode $domNode, Behavior\Tag $tag): ?DOMNode
+    protected function handleMandatoryAttributes(DOMElement $domElement, Behavior\Tag $tag): ?DOMNode
     {
-        if (!$domNode instanceof DOMElement) {
-            return $domNode;
-        }
         foreach ($tag->getAttrs() as $attr) {
-            if ($attr->isMandatory() && !$domNode->hasAttribute($attr->getName())) {
+            if ($attr->isMandatory() && !$domElement->hasAttribute($attr->getName())) {
                 $this->log('Missing mandatory attribute {nodeName}.{attrName}', [
                     'behavior' => $this->behavior->getName(),
-                    'nodeName' => $domNode->nodeName,
+                    'nodeName' => $domElement->nodeName,
                     'attrName' => $attr->getName(),
                 ]);
-                return $this->handleInvalidNode($domNode);
+                return $this->handleInvalidNode($domElement);
             }
         }
-        return $domNode;
+        return $domElement;
     }
 
     protected function handleInvalidNode(DOMNode $domNode): ?DOMNode
